@@ -1,10 +1,12 @@
 """Measure peak GPU memory of Swin UNETR training and inference before the long run.
 
-Run:  python swinunetr/check_gpu_memory.py
-Uses random data with the configured batch size / patch size, AMP and optimizer,
-so it reports what train.py and predict.py will actually need.
+Run:  python swinunetr/check_gpu_memory.py   # With gradient checkpointing (default)
+      python swinunetr/check_gpu_memory.py --no_checkpoint   # Without gradient checkpointing
+
 """
 import config as cfg  # must be first
+
+import argparse
 
 import torch
 import torch.nn as nn
@@ -52,6 +54,14 @@ def inference_peak():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no_checkpoint", action="store_true", help="disable gradient checkpointing")
+    parser.add_argument("--batch_size", type=int, default=cfg.batch_size)
+    args = parser.parse_args()
+    if args.no_checkpoint:
+        cfg.use_checkpoint = False
+    cfg.batch_size = args.batch_size
+
     total = torch.cuda.get_device_properties(cfg.device).total_memory / GB
     print(f"GPU: {torch.cuda.get_device_name(cfg.device)} ({total:.1f} GB)")
     print(f"feature_size={cfg.feature_size} use_checkpoint={cfg.use_checkpoint} roi={cfg.roi_size}")
@@ -62,7 +72,7 @@ if __name__ == "__main__":
         if peak > 0.9 * total:
             print("  -> close to the limit: set use_checkpoint=True or batch_size=1 in config.py")
     except torch.cuda.OutOfMemoryError:
-        print(f"training   batch_size={cfg.batch_size}: OUT OF MEMORY -> set use_checkpoint=True or batch_size=1 in config.py")
+        print(f"training   batch_size={cfg.batch_size}: OUT OF MEMORY (needs > {total:.1f} GB) -> set use_checkpoint=True or batch_size=1 in config.py")
         torch.cuda.empty_cache()
 
     try:
