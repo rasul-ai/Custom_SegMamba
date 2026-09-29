@@ -11,9 +11,13 @@ from .launch import launch_dist
 from monai.utils import set_determinism
 from .sampler import SequentialDistributedSampler, distributed_concat
 from torch.utils.tensorboard import SummaryWriter
-from torch.cuda.amp import GradScaler
 from torch import autocast, nn
 import time 
+
+try:
+    from torch.amp import GradScaler as TorchGradScaler
+except ImportError:
+    from torch.cuda.amp import GradScaler as TorchGradScaler
 
 class dummy_context(object):
     def __enter__(self):
@@ -64,7 +68,10 @@ class Trainer:
         if self.device == "cpu":
             self.grad_scaler = None 
         else :
-            self.grad_scaler = GradScaler()
+            try:
+                self.grad_scaler = TorchGradScaler("cuda")
+            except TypeError:
+                self.grad_scaler = TorchGradScaler()
 
         torch.backends.cudnn.enabled = True
 
@@ -403,18 +410,32 @@ class Trainer:
             self.scheduler = PolyLRScheduler(self.optimizer, initial_lr=lr, max_steps=self.max_steps)
             print(f"scheduler_type is poly, warmup steps is {0}")
 
-        for epoch in range(0, self.max_epochs):
-            self.epoch = epoch 
-            if self.ddp:
-                torch.distributed.barrier()
-            self.train_epoch(
-                            epoch,
-                            )
-            if (self.epoch + 1) % self.val_every == 0:
-                self.validate()
-            
-            if self.model is not None:
-                self.model.train()
+        try:
+            for epoch in range(0, self.max_epochs):
+                self.epoch = epoch 
+                if self.ddp:
+                    torch.distributed.barrier()
+                self.train_epoch(
+                                epoch,
+                                )
+                if (self.epoch + 1) % self.val_every == 0:
+                    self.validate()
+                
+                if self.model is not None:
+                    self.model.train()
+        finally:
+            # Avoid dangling background augmenter workers/threads at shutdown.
+            for loader_name in ("train_loader", "val_loader"):
+                loader = getattr(self, loader_name, None)
+                if loader is not None and hasattr(loader, "_finish"):
+                    try:
+                        loader._finish()
+                    except Exception:
+                        pass
+
+            writer = getattr(self, "writer", None)
+            if writer is not None:
+                writer.close()
 
     def before_data_to_device(self, batch_data):
         return batch_data 

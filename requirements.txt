@@ -1,0 +1,14 @@
+# Upgrade packaging toolchain first
+pip install -U pip setuptools wheel packaging ninja
+
+# Install PyTorch first (pick CUDA build matching your machine)
+# Example for CUDA 11.8:
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Core python deps used by this repo
+pip install monai einops triton transformers
+pip install numpy tensorboard scipy scikit-image SimpleITK medpy tqdm pandas scikit-learn pillow
+pip install batchgenerators acvl-utils dynamic-network-architectures nnunetv2
+
+# To visualize 3d img
+pip install matplotlib SimpleITK

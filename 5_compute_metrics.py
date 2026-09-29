@@ -21,6 +21,13 @@ args = parser.parse_args()
 
 pred_name = args.pred_name
 
+
+def resolve_existing_path(candidates):
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(f"None of these paths exists: {candidates}")
+
 def cal_metric(gt, pred, voxel_spacing):
     if pred.sum() > 0 and gt.sum() > 0:
         dice = metric.binary.dc(pred, gt)
@@ -48,22 +55,35 @@ def convert_labels(labels):
 
 if __name__ == "__main__":
     data_dir = "./data/fullres/train"
-    raw_data_dir = "./data/raw_data/BraTS2023/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/"
+    raw_data_dir = "data/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData"
     train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(data_dir)
     print(len(test_ds))
-    all_results = np.zeros((250,3,2))
+    all_results = np.zeros((len(test_ds), 3, 2), dtype=np.float32)
 
     ind = 0
     for batch in tqdm(test_ds, total=len(test_ds)):
         properties = batch["properties"]
         case_name = properties["name"]
-        gt_itk = os.path.join(raw_data_dir, case_name, f"seg.nii.gz")
+
+        gt_itk = resolve_existing_path([
+            os.path.join(raw_data_dir, case_name, "seg.nii.gz"),
+            os.path.join(raw_data_dir, case_name, "seg.nii"),
+            os.path.join(raw_data_dir, case_name, f"{case_name}_seg.nii.gz"),
+            os.path.join(raw_data_dir, case_name, f"{case_name}_seg.nii"),
+        ])
         voxel_spacing = [1, 1, 1]
         gt_itk = sitk.ReadImage(gt_itk)
         gt_array = sitk.GetArrayFromImage(gt_itk).astype(np.int32)
+        # BraTS2020 uses label 4 for enhancing tumor; map to 3 for TC/WT/ET conversion.
+        gt_array[gt_array == 4] = 3
         gt_array = torch.from_numpy(gt_array)
         gt_array = convert_labels(gt_array).numpy()
-        pred_itk = sitk.ReadImage(f"./{results_root}/{pred_name}/{case_name}.nii.gz")
+
+        pred_itk_path = resolve_existing_path([
+            f"./{results_root}/{pred_name}/{case_name}.nii.gz",
+            f"./{results_root}/{pred_name}/{case_name}.nii",
+        ])
+        pred_itk = sitk.ReadImage(pred_itk_path)
         pred_array = sitk.GetArrayFromImage(pred_itk)
 
         m = each_cases_metric(gt_array, pred_array, voxel_spacing)

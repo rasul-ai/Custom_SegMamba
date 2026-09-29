@@ -3,7 +3,7 @@
 
 import os 
 
-data_dir = "./data/raw_data/BraTS2023/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/"
+data_dir = "data/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData"
 
 all_cases = os.listdir(data_dir)
 

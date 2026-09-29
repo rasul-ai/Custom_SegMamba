@@ -10,7 +10,19 @@ import math
 
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import custom_fwd, custom_bwd
+
+try:
+    from torch.amp import custom_bwd as _custom_bwd, custom_fwd as _custom_fwd
+
+    def custom_fwd(*args, **kwargs):
+        kwargs.setdefault("device_type", "cuda")
+        return _custom_fwd(*args, **kwargs)
+
+    def custom_bwd(*args, **kwargs):
+        kwargs.setdefault("device_type", "cuda")
+        return _custom_bwd(*args, **kwargs)
+except ImportError:
+    from torch.cuda.amp import custom_fwd, custom_bwd
 
 import triton
 import triton.language as tl

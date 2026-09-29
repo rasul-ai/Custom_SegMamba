@@ -11,8 +11,8 @@ from monai.losses.dice import DiceLoss
 set_determinism(123)
 import os
 
-data_dir = "./data/fullres/train"
-logdir = f"./logs/segmamba"
+data_dir = "data/fullres/train"
+logdir = "logs/segmamba"
 
 model_save_path = os.path.join(logdir, "model")
 # augmentation = "nomirror"
@@ -75,8 +75,12 @@ class BraTSTrainer(Trainer):
     def get_input(self, batch):
         image = batch["data"]
         label = batch["seg"]
-    
+
         label = label[:, 0].long()
+        # BraTS2020 raw labels are typically {0, 1, 2, 4}; map 4 -> 3 for 4-class CE training.
+        # Also guard against any negative padding labels that can appear before cleanup transforms.
+        label = torch.where(label == 4, torch.tensor(3, device=label.device), label)
+        label = torch.where(label < 0, torch.tensor(0, device=label.device), label)
         return image, label
 
     def cal_metric(self, gt, pred, voxel_spacing=[1.0, 1.0, 1.0]):
