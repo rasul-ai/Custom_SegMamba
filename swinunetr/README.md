@@ -26,7 +26,7 @@ python swinunetr/check_gpu_memory.py
 python swinunetr/train.py
 
 # 2. predict the test split -> prediction_results/swinunetr/
-python swinunetr/predict.py --ckpt logs/swinunetr/model/best_model_0.7493.pt
+python swinunetr/predict.py --ckpt logs/swinunetr/model/best_model_0.8923.pt
 
 # 3. metrics, using the same script as SegMamba
 python 5_compute_metrics.py --pred_name swinunetr
@@ -53,22 +53,16 @@ Forward pass: a checkpointed block runs as normal. PyTorch keeps only its input 
 Backward pass: when the gradient reaches that block, PyTorch runs the block's forward computation again from the saved input to regenerate those activations. It then computes the block's gradients and frees them straight away.
 The difference in what stays in memory:
 
-
+```bash
 without:  [input][qkv][attn][softmax][mlp_hidden]...   ← kept for every block
 with:     [input]                                      ← kept per block
           + one block's internals at a time, during its backward
+```
 So memory for the checkpointed parts goes from "all blocks' internals" down to "all blocks' inputs plus one block's internals".
 
 The cost is compute, not accuracy. Each checkpointed block runs its forward pass twice, which adds roughly 20–30% to the time per step. The gradients are the same as without checkpointing, apart from tiny floating-point differences, so the trained model is no worse.
 
-In Swin UNETR specifically. MONAI wraps each Swin transformer block when use_checkpoint=True (monai/networks/nets/swin_unetr.py):
-
-
-for blk in self.blocks:
-    if self.use_checkpoint:
-        x = checkpoint.checkpoint(blk, x, mask_matrix, use_reentrant=False)
-    else:
-        x = blk(x, mask_matrix)
+In Swin UNETR specifically. MONAI wraps each Swin transformer block when use_checkpoint=True (monai/networks/nets/swin_unetr.py).
 Those blocks are the right thing to checkpoint because window attention creates large attention matrices, about 4 GB per block at the first stage for your batch size. The convolutional encoder and decoder are not checkpointed, so their full-resolution feature maps still account for most of the 16.5 GB you measured.
 
 Why accuracy is unaffected. The recomputed activations are the same numbers the first forward pass produced: same weights, same input, same operations. So the gradients and weight updates match those of a run without checkpointing. 

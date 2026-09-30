@@ -118,6 +118,12 @@ python 5_compute_metrics.py --pred_name="segmamba"
 ```
 
 
+### Analyze Tensorboard files
+```bash
+python -m tensorboard.main --logdir logs/segmamba
+```
+
+
 
 ## Acknowledgement
 Many thanks for these repos for their great contribution!

@@ -1,14 +1,41 @@
-# Upgrade packaging toolchain first
-pip install -U pip setuptools wheel packaging ninja
+# Install with:
+#   pip install -U pip setuptools wheel
+#   pip install -r requirements.txt
+#
+# causal-conv1d and mamba are built from the local folders after this
+# (see README: "Install causal-conv1d" / "Install mamba").
 
-# Install PyTorch first (pick CUDA build matching your machine)
-# Example for CUDA 11.8:
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# PyTorch CUDA build: change cu118 to match your CUDA version
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+torchaudio
 
-# Core python deps used by this repo
-pip install monai einops triton transformers
-pip install numpy tensorboard scipy scikit-image SimpleITK medpy tqdm pandas scikit-learn pillow
-pip install batchgenerators acvl-utils dynamic-network-architectures nnunetv2
+# Build tools (needed to compile causal-conv1d and mamba)
+packaging
+ninja
 
-# To visualize 3d img
-pip install matplotlib SimpleITK
+# Core deps
+monai
+einops
+triton
+transformers
+numpy
+scipy
+pandas
+scikit-image
+scikit-learn
+pillow
+SimpleITK
+medpy
+tqdm
+tensorboard
+
+# nnU-Net preprocessing utilities
+batchgenerators
+acvl-utils
+dynamic-network-architectures
+nnunetv2
+
+# Visualization (visualize_brats.py, comparison plots)
+matplotlib
