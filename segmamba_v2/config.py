@@ -1,13 +1,14 @@
-"""Shared settings for SegMamba v2 on MSLesSeg (MS lesion segmentation, FLAIR + T1).
+"""Shared settings for SegMamba v2 on MS3SEG (FLAIR + T1 -> ventricles, normal WMH, MS lesions).
 
 Same network and training recipe as SegMamba v2 on BraTS (SGD + poly over 250 epochs, BCE + soft Dice,
-deep supervision, 128^3 patches, sliding window + mirror TTA). What changes for MS lesions:
+deep supervision, 128^3 patches, sliding window + mirror TTA). What changes for MS3SEG:
   1. input = FLAIR + T1 only (2 channels), so the model also runs on data without T2 (e.g. the SVD cohort)
-  2. output = 1 sigmoid channel (lesion)
-  3. patient-level 5-fold CV over the 53 MSLesSeg train patients; the official test set (22 patients) is held out
-  4. intensity z-score inside each channel's brain mask
-  5. scans with a broken or misregistered FLAIR/T1 are left out of training and validation (`excluded`)
-  6. post-processing = removal of predicted lesions below a size tuned on validation (evaluate.py --tune)
+  2. output = 3 sigmoid channels: ventricles, normal WMH, abnormal WMH (MS lesion), as in MS3SEG's 4-class scenario
+  3. the official MS3SEG split: 5 folds (64 train / 16 val patients) + 20 held-out test patients
+  4. native FLAIR space (MS3SEG has no MNI step): skull-stripped with the dataset's brain mask, slices resampled to
+     1 mm for the network, predictions resampled back onto the native FLAIR grid
+  5. intensity z-score inside the brain mask
+  6. post-processing = removal of predicted MS lesions below a size tuned on validation (evaluate.py --tune)
 """
 import argparse
 import json
@@ -28,33 +29,29 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 _parser = argparse.ArgumentParser(add_help=False)
 default_seed = 123
 _parser.add_argument("--seed", type=int, default=default_seed)
-_parser.add_argument("--fold", type=int, default=0)
+_parser.add_argument("--fold", type=int, default=1)  # official MS3SEG folds are numbered 1-5
 _args = _parser.parse_known_args()[0]
 seed, fold = _args.seed, _args.fold
 
 # ---------------- data ----------------
-modalities = ["FLAIR", "T1"]  # channel order; external cases provide flair.nii.gz and t1.nii.gz
-# written by preprocess.py; set MSLESSEG_DATA_DIR to keep it elsewhere (e.g. on a bigger disk)
-data_dir = os.environ.get("MSLESSEG_DATA_DIR", os.path.join(ROOT, "data", "mslesseg_fullres"))
+modalities = ["FLAIR", "T1"]  # channel order; external cases provide flair.nii.gz, t1.nii.gz, brain_mask.nii.gz
+# Label values follow MS3SEG (0 = background); output channel k predicts label k + 1.
+classes = {1: "ventricles", 2: "nwmh", 3: "lesion"}
+mask_folders = {1: "Vent", 2: "nWMH", 3: "abWMH"}  # MS_100_patient_masks/<folder>_Masks/<id>/<id>_<folder>_Mask.nii.gz
+lesion_label = 3
+num_classes = len(classes)
+# written by preprocess.py; set MS3SEG_DATA_DIR to keep it elsewhere (e.g. on a bigger disk)
+data_dir = os.environ.get("MS3SEG_DATA_DIR", os.path.join(ROOT, "data", "ms3seg_fullres"))
 cases_file = os.path.join(data_dir, "cases.json")
-splits_file = os.path.join(data_dir, "splits.json")
-num_folds = 5
-split_seed = 12345
-out_spacing = [1.0, 1.0, 1.0]  # MSLesSeg is already MNI152 1 mm; anything else is resampled
+splits_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ms3seg_splits.json")  # official MS3SEG split
+# Spacing the network sees, in array (z, y, x) order. MS3SEG is 6-8 mm slices at 0.8984 mm in-plane: slices are
+# resampled to 1 mm, in-plane stays native. (Resampling in-plane to 1 mm and back cost normal WMH ~7% Dice even for
+# a perfect prediction; the z round trip is lossless.)
+out_spacing = [1.0, 0.8984, 0.8984]
 roi_size = [128, 128, 128]
-# Found by QC of the preprocessed MSLesSeg data. The lesion masks follow FLAIR in all of these.
-excluded = {
-    "P49_T2": "T1 is empty",
-    "P44_T1": "FLAIR registered about 1.6x too large (does not match T1)",
-    "P45_T1": "FLAIR registered about 1.7x too large (does not match T1)",
-    "P53_T1": "FLAIR registered about 1.6x too large (does not match T1)",
-    "P12_T1": "T1 misaligned with FLAIR",
-    "P12_T3": "T1 misaligned with FLAIR",
-    "P12_T4": "T1 misaligned with FLAIR",
-}
 
 # ---------------- training ----------------
-run_name = f"segmamba_v2_ms_fold{fold}" + ("" if seed == default_seed else f"_seed{seed}")
+run_name = f"segmamba_v2_ms3seg_fold{fold}" + ("" if seed == default_seed else f"_seed{seed}")
 logdir = os.path.join("logs", run_name)
 model_save_path = os.path.join(logdir, "model")
 env = "pytorch"
@@ -75,7 +72,6 @@ warmup_ratio = 0.03
 # ---------------- model / loss ----------------
 feat_size = [48, 96, 192, 384]
 depths = [2, 2, 2, 2]
-num_classes = 1  # lesion (sigmoid)
 deep_supervision = True
 batch_dice = True  # Dice over the whole batch: more stable for patches with few lesion voxels
 
@@ -103,13 +99,14 @@ def load_json(path):
 
 
 def split_cases(split):
-    """Case names of the MSLesSeg "val" split (of the current fold) or of the official "test" split."""
-    if not os.path.exists(splits_file):
-        raise FileNotFoundError(f"{splits_file} not found; run segmamba_v2/preprocess.py first")
+    """Patient IDs of the "train" or "val" split of the current fold, or of the official "test" split."""
     splits = load_json(splits_file)
-    if not 0 <= fold < len(splits["folds"]):
-        raise ValueError(f"--fold must be 0..{len(splits['folds']) - 1}")
-    return splits["folds"][fold][split] if split in ("train", "val") else splits["test"]
+    if split == "test":
+        return sorted(splits["test_patients"])
+    folds = splits["fold_assignments"]
+    if f"fold_{fold}" not in folds:
+        raise ValueError(f"--fold must be one of {sorted(int(k.split('_')[1]) for k in folds)}")
+    return sorted(folds[f"fold_{fold}"][f"{split}_patients"])
 
 
 def build_model():
