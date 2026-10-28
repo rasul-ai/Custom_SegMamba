@@ -270,6 +270,38 @@ def get_train_val_test_loader_from_train(data_dir, train_rate=0.7, val_rate=0.1,
 
     return loader
 
+def get_train_val_test_loader_from_train_by_group(data_dir, group_fn, train_rate=0.7, val_rate=0.1, seed=42):
+    ## same as get_train_val_test_loader_from_train, but all cases of a group (e.g. the timepoints of one
+    ## patient, group_fn(case_name) -> group id) end up in the same split. Groups are sorted before
+    ## shuffling, so the split does not depend on the file-listing order; the test split takes the rest.
+    groups = {}
+    for p in sorted(glob.glob(f"{data_dir}/*.npz")):
+        groups.setdefault(group_fn(os.path.basename(p)[:-4]), []).append(p)
+    names = sorted(groups)
+
+    train_number = int(len(names) * train_rate)
+    val_number = int(len(names) * val_rate)
+    random.seed(seed)
+    random.shuffle(names)
+
+    to_datalist = lambda group_names: [p for g in group_names for p in groups[g]]
+    train_datalist = to_datalist(names[:train_number])
+    val_datalist = to_datalist(names[train_number: train_number + val_number])
+    test_datalist = to_datalist(names[train_number + val_number:])
+
+    print(f"{len(names)} groups: {train_number} train, {val_number} validation, {len(names) - train_number - val_number} test")
+    print(f"training data is {len(train_datalist)}")
+    print(f"validation data is {len(val_datalist)}")
+    print(f"test data is {len(test_datalist)}")
+
+    train_ds = MedicalDataset(train_datalist)
+    val_ds = MedicalDataset(val_datalist)
+    test_ds = MedicalDataset(test_datalist)
+
+    loader = [train_ds, val_ds, test_ds]
+
+    return loader
+
 def get_train_loader_from_train(data_dir):
     ## train all labeled data 
     ## fold denote the validation data in training data
