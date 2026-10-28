@@ -37,5 +37,5 @@ acvl-utils
 dynamic-network-architectures
 nnunetv2
 
-# Not pip packages: FSL (flirt, bet, convert_xfm, fslmaths) is needed only by segmamba_v2/svd_mni.py,
-# to bring SVD scans into the MSLesSeg space; install it from https://fsl.fmrib.ox.ac.uk
+# Not pip packages: FSL (flirt, bet) is needed only by segmamba_v2/svd_flair.py, to prepare SVD scans
+# like MS3SEG (T1 registered to FLAIR, FLAIR brain mask); install it from https://fsl.fmrib.ox.ac.uk
