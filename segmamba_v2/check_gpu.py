@@ -3,8 +3,8 @@
 Run:  python segmamba_v2/check_gpu.py
       python segmamba_v2/check_gpu.py --batch_size 1
 Builds SegMamba with the configured channels, runs 3 training steps at the configured batch and patch size
-(AMP + deep-supervision loss, as in train.py), then one sliding-window inference over a full 182x218x182
-MNI volume (the largest input predict.py sees).
+(AMP + deep-supervision loss, as in train.py), then one sliding-window inference over a 162x256x256 volume
+(the largest MS3SEG FLAIR at the network's spacing, before cropping to the brain).
 """
 import config as cfg  # must be first
 
@@ -16,6 +16,7 @@ from monai.inferers import SlidingWindowInferer
 from losses import DeepSupervisionLoss, DiceBCELoss
 
 GB = 1024 ** 3
+INFER_SHAPE = (162, 256, 256)
 
 
 def train_peak(batch_size):
@@ -45,13 +46,13 @@ def inference_peak():
     model = cfg.build_model().to(cfg.device).eval()
     infer = SlidingWindowInferer(roi_size=cfg.roi_size, sw_batch_size=cfg.sw_batch_size,
                                  overlap=cfg.sw_overlap, mode="gaussian")
-    x = torch.randn(1, len(cfg.modalities), 182, 218, 182, device=cfg.device)
+    x = torch.randn(1, len(cfg.modalities), *INFER_SHAPE, device=cfg.device)
     torch.cuda.reset_peak_memory_stats()
     with torch.no_grad(), torch.autocast("cuda"):
         out = infer(x, model)
     torch.cuda.synchronize()
     peak = torch.cuda.max_memory_reserved() / GB
-    assert out.shape == (1, cfg.num_classes, 182, 218, 182), out.shape
+    assert out.shape == (1, cfg.num_classes, *INFER_SHAPE), out.shape
     del model, x, out
     torch.cuda.empty_cache()
     return peak
