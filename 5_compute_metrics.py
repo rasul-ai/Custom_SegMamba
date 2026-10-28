@@ -1,4 +1,5 @@
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
+import brats2023
+from brats2023 import get_train_val_test_loader
 from monai.utils import set_determinism
 import torch 
 import os
@@ -16,7 +17,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--pred_name", required=True, type=str)
 
-results_root = "prediction_results"
+results_root = brats2023.results_root
 args = parser.parse_args()
 
 pred_name = args.pred_name
@@ -54,9 +55,8 @@ def convert_labels(labels):
 
 
 if __name__ == "__main__":
-    data_dir = "./data/fullres/train"
-    raw_data_dir = "data/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData"
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(data_dir)
+    data_dir = brats2023.data_dir
+    train_ds, val_ds, test_ds = get_train_val_test_loader(data_dir)
     print(len(test_ds))
     all_results = np.zeros((len(test_ds), 3, 2), dtype=np.float32)
 
@@ -65,23 +65,16 @@ if __name__ == "__main__":
         properties = batch["properties"]
         case_name = properties["name"]
 
-        gt_itk = resolve_existing_path([
-            os.path.join(raw_data_dir, case_name, "seg.nii.gz"),
-            os.path.join(raw_data_dir, case_name, "seg.nii"),
-            os.path.join(raw_data_dir, case_name, f"{case_name}_seg.nii.gz"),
-            os.path.join(raw_data_dir, case_name, f"{case_name}_seg.nii"),
-        ])
+        gt_itk = brats2023.case_file(case_name, "seg")
         voxel_spacing = [1, 1, 1]
         gt_itk = sitk.ReadImage(gt_itk)
         gt_array = sitk.GetArrayFromImage(gt_itk).astype(np.int32)
-        # BraTS2020 uses label 4 for enhancing tumor; map to 3 for TC/WT/ET conversion.
-        gt_array[gt_array == 4] = 3
         gt_array = torch.from_numpy(gt_array)
         gt_array = convert_labels(gt_array).numpy()
 
         pred_itk_path = resolve_existing_path([
-            f"./{results_root}/{pred_name}/{case_name}.nii.gz",
-            f"./{results_root}/{pred_name}/{case_name}.nii",
+            os.path.join(results_root, pred_name, f"{case_name}.nii.gz"),
+            os.path.join(results_root, pred_name, f"{case_name}.nii"),
         ])
         pred_itk = sitk.ReadImage(pred_itk_path)
         pred_array = sitk.GetArrayFromImage(pred_itk)
@@ -92,10 +85,10 @@ if __name__ == "__main__":
     
         ind += 1
 
-    os.makedirs(f"./{results_root}/result_metrics/", exist_ok=True)
-    np.save(f"./{results_root}/result_metrics/{pred_name}.npy", all_results) 
+    os.makedirs(os.path.join(results_root, "result_metrics"), exist_ok=True)
+    np.save(os.path.join(results_root, "result_metrics", f"{pred_name}.npy"), all_results) 
     
-    result = np.load(f"./{results_root}/result_metrics/{pred_name}.npy")
+    result = np.load(os.path.join(results_root, "result_metrics", f"{pred_name}.npy"))
     print(result.shape)
     print(result.mean(axis=0))
     print(result.std(axis=0))
