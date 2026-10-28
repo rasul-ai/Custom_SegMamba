@@ -1,11 +1,11 @@
-# Swin UNETR baseline (BraTS2020), for comparison with SegMamba
+# Swin UNETR baseline (BraTS2023), for comparison with SegMamba
 
 This folder trains and evaluates [Swin UNETR](https://arxiv.org/abs/2201.01266) using the same pipeline as SegMamba. The comparison stays controlled because both models share:
 
 | | SegMamba (`3_train.py`) | Swin UNETR (this folder) |
 |---|---|---|
-| Data | `data/fullres/train` | same |
-| Split | `get_train_val_test_loader_from_train` (70/10/20, seed 42) | same |
+| Data | `data/fullres_brats2023/train` (`brats2023.data_dir`) | same |
+| Split | `brats2023.get_train_val_test_loader` (70/10/20 by patient, seed 42) | same |
 | Patch / batch | 128³ / 2 | same |
 | Augmentation | `light_training` nnU-Net-style | same |
 | Budget | 1000 epochs × 250 steps, validation every 2 epochs | same |
@@ -22,17 +22,17 @@ All settings are in `config.py`.
 # 0. optional: check peak GPU memory for the configured batch/patch size (takes about a minute)
 python swinunetr/check_gpu_memory.py
 
-# 1. train  -> logs/swinunetr/ (tensorboard + checkpoints + data_split.json)
+# 1. train  -> logs/brats2023/swinunetr/ (tensorboard + checkpoints + data_split.json)
 python swinunetr/train.py
 
-# 2. predict the test split -> prediction_results/swinunetr/
-python swinunetr/predict.py --ckpt logs/swinunetr/model/best_model_0.8923.pt
+# 2. predict the test split -> prediction_results/brats2023/swinunetr/ (default: the best checkpoint of the run)
+python swinunetr/predict.py
 
 # 3. metrics, using the same script as SegMamba
 python 5_compute_metrics.py --pred_name swinunetr
 python 5_compute_metrics.py --pred_name segmamba
 
-# 4. side-by-side table with a paired Wilcoxon test
+# 4. side-by-side table with a paired Wilcoxon test (reads prediction_results/brats2023/result_metrics/)
 python swinunetr/compare_models.py
 ```
 
@@ -73,6 +73,6 @@ So, it saves memory by not storing activations. But they're recomputed during th
 
 ## Notes
 
-- **The split must match SegMamba's.** The split shuffles `glob()` output, and file order can differ between machines. Train on the same machine and with the same
-  `data/fullres/train` folder that SegMamba used. `train.py` saves the split to `logs/swinunetr/data_split.json`, and `predict.py` refuses to run if the test set differs.
+- **The split must match SegMamba's.** All models use `brats2023.get_train_val_test_loader`, which sorts the patients before the seeded shuffle, so the split
+  depends only on which cases are in `data/fullres_brats2023/train`. `train.py` saves the split to `logs/brats2023/swinunetr/data_split.json`, and `predict.py` refuses to run if the test set differs.
 - Swin UNETR is trained from scratch, like SegMamba. No pretrained weights are used.

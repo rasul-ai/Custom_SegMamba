@@ -4,6 +4,8 @@
 
 **Now we have open-sourced the pre-processing, training, inference, and metrics computation codes.**
 
+> **Branch `brats2023`:** this branch trains SegMamba (original recipe and v2) and the Swin UNETR baseline on BraTS2023 (GLI); see [the BraTS2023 section](#brats2023-preprocessing-training-testing-inference-and-metrics-computation-branch-brats2023). Branch `main` holds the BraTS2020 runs.
+
 SegMamba: Long-range Sequential Modeling Mamba For 3D Medical Image Segmentation
 
 [https://arxiv.org/abs/2401.13560](https://arxiv.org/abs/2401.13560)
@@ -54,73 +56,69 @@ pip install monai
 python 0_inference.py
 ```
 
-## Preprocessing, training, testing, inference, and metrics computation
+## BraTS2023: preprocessing, training, testing, inference, and metrics computation (branch `brats2023`)
 
-### Data downloading 
+This branch trains on the BraTS2023 glioma (GLI) training data. Branch `main` keeps the BraTS2020 runs. All BraTS2023 settings are in `brats2023.py`:
+- raw-data path and file names;
+- channel order: FLAIR, T2, T1, T1ce, i.e. `t2f`, `t2w`, `t1n`, `t1c`;
+- the patient-level split;
+- output paths. Preprocessed data, logs and predictions go to their own `brats2023` folders, so they never mix with the BraTS2020 ones in the same checkout.
 
-Data is from [https://arxiv.org/abs/2305.17033](https://arxiv.org/abs/2305.17033)
+### Data
 
-Download from Baidu Disk  [https://pan.baidu.com/s/1C0FUHdDtWNaYWLtDDP9TnA?pwd=ty22提取码ty22](https://pan.baidu.com/s/1C0FUHdDtWNaYWLtDDP9TnA?pwd=ty22) 
+Put the extracted training data at `data/BraTS2023/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/`, or point `BRATS2023_DIR` to it. Each case is `<case>/<case>-{t2f,t2w,t1n,t1c,seg}.nii.gz` and is read as it is; there is no renaming step any more.
 
-Download from OneDrive [https://hkustgz-my.sharepoint.com/:f:/g/personal/zxing565_connect_hkust-gz_edu_cn/EqqaINbHRxREuIj0XGicY2EBv8hjwEFKgFOhF_Ub0mvENw?e=yTpE9B](https://hkustgz-my.sharepoint.com/:f:/g/personal/zxing565_connect_hkust-gz_edu_cn/EqqaINbHRxREuIj0XGicY2EBv8hjwEFKgFOhF_Ub0mvENw?e=yTpE9B)
+- 1,251 cases, all 240×240×155 at 1 mm.
+- Labels are 1 (necrotic core), 2 (edema), 3 (enhancing tumor). BraTS2020 used 4 for ET.
+- The challenge's `ValidationData` has no segmentations, so it is not used.
 
 ### Preprocessing
-In my setting, the data directory of BraTS2023 is : "./data/raw_data/BraTS2023/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/"
 
-First, we need to run the rename process.
-
-```bash 
-python 1_rename_mri_data.py
-```
-
-Then, we need to run the pre-processing code to do resample, normalization, and crop processes.
+Resampling, normalization and cropping, as before:
 
 ```bash
 python 2_preprocessing_mri.py
 ```
 
-After pre-processing, the data structure will be in this format:
+- Output goes to `data/fullres_brats2023/train/`; set `BRATS2023_FULLRES_DIR` to put it elsewhere.
+- Plan for about **90 GB** of disk: the `.npz` files take 18 GB, and training unpacks them to `.npy` (70 GB) next to them.
+- The first step (`plan()`) only analyses the data and writes `data_analysis_result.txt`.
 
-![](images/data_structure.jpg)
-### Training 
+### Split
 
-When the pre-processing process is done, we can train our model.
+`brats2023.get_train_val_test_loader` makes a 70/10/20 train / validation / test split **by patient**, with seed 42.
+- 118 patients have two scans (`...-000` and a follow-up `...-001`). Both scans of a patient always land in the same split, so no patient is in both training and test.
+- Patients are sorted before the seeded shuffle, so the split does not depend on the file-listing order.
+- All models (`3_train.py`, `segmamba_v2/`, `swinunetr/`) use this split.
 
-We mainly use the pre-processde data from last step: **data_dir = "./data/fullres/train"**
-
-
-```bash 
-python 3_train.py
-```
-
-The training logs and checkpoints are saved in:
-**logdir = f"./logs/segmamba"**
-
-
-
-
-### Inference 
-
-When we have trained our models, we can inference all the data in testing set.
-
-```bash 
-python 4_predict.py
-```
-
-When this process is done, the prediction cases will be put in this path:
-**save_path = "./prediction_results/segmamba"**
-
-### Metrics computation
-We can obtain the Dice score and HD95 on each segmentation target (WT, TC, ET for BraTS2023 dataset) using this code:
+### Training
 
 ```bash
-python 5_compute_metrics.py --pred_name="segmamba"
+python 3_train.py                  # original SegMamba recipe -> logs/brats2023/segmamba/
+python segmamba_v2/train.py        # SegMamba v2 recipe      -> logs/brats2023/segmamba_v2/  (see segmamba_v2/README.md)
+python swinunetr/train.py          # Swin UNETR baseline     -> logs/brats2023/swinunetr/    (see swinunetr/README.md)
 ```
 
+### Inference
+
+```bash
+python 4_predict.py                # best checkpoint of 3_train.py -> prediction_results/brats2023/segmamba/
+```
+
+`segmamba_v2/predict.py` and `swinunetr/predict.py` write to `prediction_results/brats2023/<model>/`.
+
+### Metrics computation
+
+Dice and HD95 for each region (WT, TC, ET) on the test split:
+
+```bash
+python 5_compute_metrics.py --pred_name segmamba      # -> prediction_results/brats2023/result_metrics/segmamba.npy
+python swinunetr/compare_models.py --models segmamba swinunetr
+```
 
 ### Analyze Tensorboard files
 ```bash
-python -m tensorboard.main --logdir logs/segmamba
+python -m tensorboard.main --logdir logs/brats2023
 ```
 
 
