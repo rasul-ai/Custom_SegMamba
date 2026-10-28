@@ -1,7 +1,10 @@
-"""Train SegMamba v2 (Phase A recipe) on BraTS2020 with the same data and split as 3_train.py.
+"""Train SegMamba v2 on MSLesSeg (FLAIR + T1 -> lesion) for one patient-level fold.
 
-Run from anywhere:  python segmamba_v2/train.py              (seed 123 -> logs/segmamba_v2/)
-                    python segmamba_v2/train.py --seed 7     (-> logs/segmamba_v2_seed7/)
+Run from anywhere (after preprocess.py):
+    python segmamba_v2/train.py --fold 0              (-> logs/segmamba_v2_ms_fold0/)
+    python segmamba_v2/train.py --fold 0 --seed 7     (-> logs/segmamba_v2_ms_fold0_seed7/)
+Validation every 2 epochs on 100 random lesion-containing patches of the fold's validation scans;
+the best patch Dice is saved as logs/<run>/model/best_model_<dice>.pt.
 """
 import config as cfg  # must be first: sets sys.path, cwd and CUDA allocator config
 
@@ -14,33 +17,31 @@ import torch
 from monai.utils import set_determinism
 
 import light_training.trainer as lt_trainer
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
+from light_training.dataloading.dataset import MedicalDataset
 from light_training.evaluation.metric import dice
 from light_training.trainer import Trainer
 from light_training.utils.files_helper import save_new_model_and_delete_last
 from losses import DeepSupervisionLoss, DiceBCELoss
 
-# Same seeding as 3_train.py and swinunetr/train.py: 123 here (model init), then Trainer.train()
-# re-seeds with 42 (data/augmentation). The default --seed 123 reproduces exactly that; another
-# --seed N shifts both by N - 123 so repeat runs actually differ.
+# Seeding as in the BraTS v2 run: 123 here (model init), then Trainer.train() re-seeds with 42
+# (data/augmentation). Another --seed N shifts both by N - 123 so repeat runs actually differ.
 set_determinism(cfg.seed)
 _seed_offset = cfg.seed - cfg.default_seed
 lt_trainer.set_determinism = lambda seed=None, **kwargs: set_determinism(None if seed is None else seed + _seed_offset, **kwargs)
 
 
-class SegMambaV2Trainer(Trainer):
+class SegMambaMSTrainer(Trainer):
     def __init__(self, env_type, max_epochs, batch_size, device="cpu", val_every=1, num_gpus=1, logdir="./logs/", master_ip='localhost', master_port=17750, training_script="train.py"):
         super().__init__(env_type, max_epochs, batch_size, device, val_every, num_gpus, logdir, master_ip, master_port, training_script)
         self.augmentation = cfg.augmentation
         self.patch_size = cfg.roi_size
-        self.train_process = 18
+        self.train_process = cfg.train_process
         self.best_mean_dice = 0.0
         self.epoch_losses = []
 
         self.model = cfg.build_model()
 
         if cfg.optimizer_name == "sgd":
-            # same optimizer as 3_train.py; poly now decays to 0 over max_epoch = 250
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=cfg.sgd_lr, weight_decay=3e-5,
                                              momentum=0.99, nesterov=True)
             self.scheduler_type = "poly"
@@ -54,9 +55,8 @@ class SegMambaV2Trainer(Trainer):
         self.loss_fn = DeepSupervisionLoss(DiceBCELoss(batch_dice=cfg.batch_dice))
 
     def get_input(self, batch):
-        image = batch["data"]
-        label = cfg.map_brats_labels(batch["seg"][:, 0].long())
-        return image, cfg.convert_labels(label[:, None])  # (B, 3, D, H, W) TC/WT/ET
+        # seg: 1 = lesion, 0 = background, -1 = outside the brain crop (padding) -> background
+        return batch["data"], (batch["seg"] > 0).float()  # (B, 2, D, H, W), (B, 1, D, H, W)
 
     def training_step(self, batch):
         image, target = self.get_input(batch)
@@ -75,7 +75,6 @@ class SegMambaV2Trainer(Trainer):
                    [epoch, float(np.mean(self.epoch_losses)), lr])
 
     def cal_metric(self, gt, pred):
-        # same as 3_train.py
         if pred.sum() > 0 and gt.sum() > 0:
             return dice(pred, gt)
         elif gt.sum() == 0 and pred.sum() == 0:
@@ -84,22 +83,15 @@ class SegMambaV2Trainer(Trainer):
 
     def validation_step(self, batch):
         image, target = self.get_input(batch)
-        regions = torch.sigmoid(self.model(image).float()) > cfg.threshold
-        output = cfg.convert_labels(cfg.regions_to_labels(regions)).cpu().numpy()
-        target = target.cpu().numpy()
-        return [self.cal_metric(target[:, i], output[:, i]) for i in range(3)]
+        output = (torch.sigmoid(self.model(image).float()) > cfg.threshold).cpu().numpy()
+        return self.cal_metric(target.cpu().numpy(), output)
 
     def validation_end(self, val_outputs):
-        tc, wt, et = val_outputs[0].mean(), val_outputs[1].mean(), val_outputs[2].mean()
-        print(f"dices is {tc, wt, et}")
-        mean_dice = (tc + wt + et) / 3
+        mean_dice = float(val_outputs.mean())
+        print(f"lesion dice (validation patches) is {mean_dice:.4f}")
 
-        self.log("tc", tc, step=self.epoch)
-        self.log("wt", wt, step=self.epoch)
-        self.log("et", et, step=self.epoch)
-        self.log("mean_dice", mean_dice, step=self.epoch)
-        append_csv(os.path.join(cfg.logdir, "val_log.csv"), ["epoch", "tc", "wt", "et", "mean_dice"],
-                   [self.epoch, float(tc), float(wt), float(et), float(mean_dice)])
+        self.log("lesion_dice", mean_dice, step=self.epoch)
+        append_csv(os.path.join(cfg.logdir, "val_log.csv"), ["epoch", "lesion_dice"], [self.epoch, mean_dice])
 
         if mean_dice > self.best_mean_dice:
             self.best_mean_dice = mean_dice
@@ -117,7 +109,6 @@ class SegMambaV2Trainer(Trainer):
 
         if torch.cuda.is_available():
             print(f"peak GPU memory so far: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
-        print(f"mean_dice is {mean_dice}")
 
 
 def append_csv(path, header, row):
@@ -129,29 +120,21 @@ def append_csv(path, header, row):
         writer.writerow(row)
 
 
-def save_split(train_ds, val_ds, test_ds):
-    """Record the split so predict.py can verify it matches (the split relies on glob order)."""
-    if min(len(train_ds), len(val_ds), len(test_ds)) == 0:
-        raise RuntimeError(f"Empty dataset split (train={len(train_ds)}, val={len(val_ds)}, test={len(test_ds)}); "
-                           f"check data_dir={cfg.data_dir}")
-    split = {"train": cfg.split_names(train_ds), "validation": cfg.split_names(val_ds), "test": cfg.split_names(test_ds)}
-
-    checked = False
-    for ref_file in cfg.reference_split_files:
-        if not os.path.exists(ref_file):
-            continue
-        with open(ref_file) as f:
-            if json.load(f) != split:
-                raise RuntimeError(f"data split differs from {ref_file}; results would not be comparable. "
-                                   f"Check that {cfg.data_dir} holds the same files as for that run.")
-        print(f"data split matches {ref_file}")
-        checked = True
-    if not checked:
-        print(f"WARNING: none of {cfg.reference_split_files} found; cannot verify the split against earlier runs.")
+def load_datasets():
+    """MedicalDatasets of the fold's train and val scans (preprocessed .npz in cfg.data_dir)."""
+    train_cases, val_cases = cfg.split_cases("train"), cfg.split_cases("val")
+    missing = [c for c in train_cases + val_cases if not os.path.exists(os.path.join(cfg.data_dir, f"{c}.npz"))]
+    if missing:
+        raise FileNotFoundError(f"{len(missing)} preprocessed cases missing in {cfg.data_dir} (e.g. {missing[:3]}); "
+                                f"run segmamba_v2/preprocess.py")
+    print(f"fold {cfg.fold}: {len(train_cases)} train scans, {len(val_cases)} val scans")
 
     os.makedirs(cfg.logdir, exist_ok=True)
-    with open(cfg.split_file, "w") as f:
-        json.dump(split, f, indent=1)
+    with open(os.path.join(cfg.logdir, "data_split.json"), "w") as f:
+        json.dump({"fold": cfg.fold, "train": train_cases, "validation": val_cases}, f, indent=1)
+
+    to_paths = lambda cases: [os.path.join(cfg.data_dir, f"{c}.npz") for c in cases]
+    return MedicalDataset(to_paths(train_cases)), MedicalDataset(to_paths(val_cases))
 
 
 if __name__ == "__main__":
@@ -159,7 +142,9 @@ if __name__ == "__main__":
         if os.path.exists(os.path.join(cfg.logdir, log_file)):
             raise FileExistsError(f"{cfg.logdir}/{log_file} exists; move the old run away or use another --seed")
 
-    trainer = SegMambaV2Trainer(env_type=cfg.env,
+    train_ds, val_ds = load_datasets()
+
+    trainer = SegMambaMSTrainer(env_type=cfg.env,
                                 max_epochs=cfg.max_epoch,
                                 batch_size=cfg.batch_size,
                                 device=cfg.device,
@@ -168,8 +153,5 @@ if __name__ == "__main__":
                                 num_gpus=cfg.num_gpus,
                                 master_port=17762,
                                 training_script=__file__)
-
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(cfg.data_dir)
-    save_split(train_ds, val_ds, test_ds)
 
     trainer.train(train_dataset=train_ds, val_dataset=val_ds)
