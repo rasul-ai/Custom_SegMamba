@@ -1,5 +1,7 @@
 import numpy as np
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
+import glob
+import brats2023
+from brats2023 import get_train_val_test_loader
 import torch 
 import torch.nn as nn 
 from monai.inferers import SlidingWindowInferer
@@ -11,7 +13,7 @@ set_determinism(123)
 import os
 from light_training.prediction import Predictor
 
-data_dir = "./data/fullres/train"
+data_dir = brats2023.data_dir
 env = "pytorch"
 max_epoch = 1000
 batch_size = 2
@@ -48,7 +50,9 @@ class BraTSTrainer(Trainer):
                         depths=[2,2,2,2],
                         feat_size=[48, 96, 192, 384])
         
-        model_path = "logs/segmamba/model/best_model_0.8859.pt"
+        # best checkpoint of 3_train.py (highest validation Dice in the file name)
+        model_path = max(glob.glob(os.path.join(brats2023.logs_root, "segmamba", "model", "best_model_*.pt")),
+                         key=lambda p: float(os.path.basename(p)[len("best_model_"):-3]))
         new_sd = self.filte_state_dict(torch.load(model_path, map_location="cpu"))
         model.load_state_dict(new_sd)
         model.eval()
@@ -61,7 +65,7 @@ class BraTSTrainer(Trainer):
         predictor = Predictor(window_infer=window_infer,
                               mirror_axes=[0,1,2])
 
-        save_path = "./prediction_results/segmamba"
+        save_path = os.path.join(brats2023.results_root, "segmamba")
         os.makedirs(save_path, exist_ok=True)
 
         return model, predictor, save_path
@@ -130,7 +134,7 @@ if __name__ == "__main__":
                             master_port=17751,
                             training_script=__file__)
     
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(data_dir)
+    train_ds, val_ds, test_ds = get_train_val_test_loader(data_dir)
 
     trainer.validation_single_gpu(test_ds)
 
