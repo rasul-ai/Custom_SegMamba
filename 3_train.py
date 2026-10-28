@@ -1,6 +1,7 @@
 import numpy as np
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
-import torch 
+import brats2023
+from brats2023 import get_train_val_test_loader
+import torch
 import torch.nn as nn 
 from monai.inferers import SlidingWindowInferer
 from light_training.evaluation.metric import dice
@@ -11,8 +12,8 @@ from monai.losses.dice import DiceLoss
 set_determinism(123)
 import os
 
-data_dir = "data/fullres/train"
-logdir = "logs/segmamba"
+data_dir = brats2023.data_dir
+logdir = os.path.join(brats2023.logs_root, "segmamba")
 
 model_save_path = os.path.join(logdir, "model")
 # augmentation = "nomirror"
@@ -77,9 +78,8 @@ class BraTSTrainer(Trainer):
         label = batch["seg"]
 
         label = label[:, 0].long()
-        # BraTS2020 raw labels are typically {0, 1, 2, 4}; map 4 -> 3 for 4-class CE training.
-        # Also guard against any negative padding labels that can appear before cleanup transforms.
-        label = torch.where(label == 4, torch.tensor(3, device=label.device), label)
+        # BraTS2023 labels are already {0, 1, 2, 3} (ET = 3), as 4-class CE training expects.
+        # Guard against any negative padding labels that can appear before cleanup transforms.
         label = torch.where(label < 0, torch.tensor(0, device=label.device), label)
         return image, label
 
@@ -167,6 +167,6 @@ if __name__ == "__main__":
                             master_port=17759,
                             training_script=__file__)
 
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(data_dir)
+    train_ds, val_ds, test_ds = get_train_val_test_loader(data_dir)
 
     trainer.train(train_dataset=train_ds, val_dataset=val_ds)
