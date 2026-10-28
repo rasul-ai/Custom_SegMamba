@@ -1,10 +1,10 @@
-"""Train SegMamba v2 on MSLesSeg (FLAIR + T1 -> lesion) for one patient-level fold.
+"""Train SegMamba v2 on MS3SEG (FLAIR + T1 -> ventricles, normal WMH, MS lesion) for one official fold.
 
 Run from anywhere (after preprocess.py):
-    python segmamba_v2/train.py --fold 0              (-> logs/segmamba_v2_ms_fold0/)
-    python segmamba_v2/train.py --fold 0 --seed 7     (-> logs/segmamba_v2_ms_fold0_seed7/)
-Validation every 2 epochs on 100 random lesion-containing patches of the fold's validation scans;
-the best patch Dice is saved as logs/<run>/model/best_model_<dice>.pt.
+    python segmamba_v2/train.py --fold 1              (-> logs/segmamba_v2_ms3seg_fold1/)
+    python segmamba_v2/train.py --fold 1 --seed 7     (-> logs/segmamba_v2_ms3seg_fold1_seed7/)
+Validation every 2 epochs on 100 random foreground patches of the fold's validation patients; the best mean
+patch Dice over the 3 classes is saved as logs/<run>/model/best_model_<dice>.pt.
 """
 import config as cfg  # must be first: sets sys.path, cwd and CUDA allocator config
 
@@ -30,7 +30,7 @@ _seed_offset = cfg.seed - cfg.default_seed
 lt_trainer.set_determinism = lambda seed=None, **kwargs: set_determinism(None if seed is None else seed + _seed_offset, **kwargs)
 
 
-class SegMambaMSTrainer(Trainer):
+class SegMambaMS3SEGTrainer(Trainer):
     def __init__(self, env_type, max_epochs, batch_size, device="cpu", val_every=1, num_gpus=1, logdir="./logs/", master_ip='localhost', master_port=17750, training_script="train.py"):
         super().__init__(env_type, max_epochs, batch_size, device, val_every, num_gpus, logdir, master_ip, master_port, training_script)
         self.augmentation = cfg.augmentation
@@ -55,8 +55,10 @@ class SegMambaMSTrainer(Trainer):
         self.loss_fn = DeepSupervisionLoss(DiceBCELoss(batch_dice=cfg.batch_dice))
 
     def get_input(self, batch):
-        # seg: 1 = lesion, 0 = background, -1 = outside the brain crop (padding) -> background
-        return batch["data"], (batch["seg"] > 0).float()  # (B, 2, D, H, W), (B, 1, D, H, W)
+        # seg: label map (cfg.classes), -1 = outside the brain crop (padding) -> background in every channel
+        seg = batch["seg"]
+        target = torch.cat([seg == label for label in sorted(cfg.classes)], dim=1).float()
+        return batch["data"], target  # (B, 2, D, H, W), (B, 3, D, H, W)
 
     def training_step(self, batch):
         image, target = self.get_input(batch)
@@ -84,14 +86,19 @@ class SegMambaMSTrainer(Trainer):
     def validation_step(self, batch):
         image, target = self.get_input(batch)
         output = (torch.sigmoid(self.model(image).float()) > cfg.threshold).cpu().numpy()
-        return self.cal_metric(target.cpu().numpy(), output)
+        target = target.cpu().numpy()
+        return [self.cal_metric(target[:, i], output[:, i]) for i in range(cfg.num_classes)]
 
     def validation_end(self, val_outputs):
-        mean_dice = float(val_outputs.mean())
-        print(f"lesion dice (validation patches) is {mean_dice:.4f}")
+        dices = [float(v.mean()) for v in val_outputs]
+        mean_dice = float(np.mean(dices))
+        names = [cfg.classes[label] for label in sorted(cfg.classes)]
+        print("dice (validation patches): " + ", ".join(f"{n} {d:.4f}" for n, d in zip(names, dices)) + f", mean {mean_dice:.4f}")
 
-        self.log("lesion_dice", mean_dice, step=self.epoch)
-        append_csv(os.path.join(cfg.logdir, "val_log.csv"), ["epoch", "lesion_dice"], [self.epoch, mean_dice])
+        for name, d in zip(names, dices):
+            self.log(f"{name}_dice", d, step=self.epoch)
+        self.log("mean_dice", mean_dice, step=self.epoch)
+        append_csv(os.path.join(cfg.logdir, "val_log.csv"), ["epoch", *names, "mean_dice"], [self.epoch, *dices, mean_dice])
 
         if mean_dice > self.best_mean_dice:
             self.best_mean_dice = mean_dice
@@ -121,13 +128,13 @@ def append_csv(path, header, row):
 
 
 def load_datasets():
-    """MedicalDatasets of the fold's train and val scans (preprocessed .npz in cfg.data_dir)."""
+    """MedicalDatasets of the fold's train and val patients (preprocessed .npz in cfg.data_dir)."""
     train_cases, val_cases = cfg.split_cases("train"), cfg.split_cases("val")
     missing = [c for c in train_cases + val_cases if not os.path.exists(os.path.join(cfg.data_dir, f"{c}.npz"))]
     if missing:
         raise FileNotFoundError(f"{len(missing)} preprocessed cases missing in {cfg.data_dir} (e.g. {missing[:3]}); "
                                 f"run segmamba_v2/preprocess.py")
-    print(f"fold {cfg.fold}: {len(train_cases)} train scans, {len(val_cases)} val scans")
+    print(f"fold {cfg.fold}: {len(train_cases)} train patients, {len(val_cases)} val patients")
 
     os.makedirs(cfg.logdir, exist_ok=True)
     with open(os.path.join(cfg.logdir, "data_split.json"), "w") as f:
@@ -144,7 +151,7 @@ if __name__ == "__main__":
 
     train_ds, val_ds = load_datasets()
 
-    trainer = SegMambaMSTrainer(env_type=cfg.env,
+    trainer = SegMambaMS3SEGTrainer(env_type=cfg.env,
                                 max_epochs=cfg.max_epoch,
                                 batch_size=cfg.batch_size,
                                 device=cfg.device,
