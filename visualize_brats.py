@@ -1,29 +1,29 @@
-import os
 import numpy as np
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib.patches import Patch
 
-case_id = "BraTS20_Training_193"
-case_dir = f"data/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData/{case_id}"
+import brats2023
+
+case_id = "BraTS-GLI-00000-000"
 out_path = f"{case_id}_modalities_overlay.png"
 
-modalities = ["t1", "t1ce", "t2", "flair"]
-titles = {"t1": "T1", "t1ce": "T1ce", "t2": "T2", "flair": "FLAIR"}
+modalities = ["t1n", "t1c", "t2w", "t2f"]
+titles = {"t1n": "T1", "t1c": "T1ce", "t2w": "T2", "t2f": "FLAIR"}
 
-imgs = {m: sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(case_dir, f"{case_id}_{m}.nii")))
+imgs = {m: sitk.GetArrayFromImage(sitk.ReadImage(brats2023.case_file(case_id, m)))
         for m in modalities}                                                   # [z, y, x]
-seg = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(case_dir, f"{case_id}_seg.nii")))  # labels: 0,1,2,4
+seg = sitk.GetArrayFromImage(sitk.ReadImage(brats2023.case_file(case_id, "seg")))  # labels: 0,1,2,3
 
 z = seg.shape[0] // 2
 
-# fixed colour per BraTS label: 1 = necrotic/non-enhancing core, 2 = edema, 4 = enhancing tumor
-labels = [1, 2, 4]
+# fixed colour per BraTS2023 label: 1 = necrotic tumor core, 2 = edema, 3 = enhancing tumor
+labels = [1, 2, 3]
 colors = ["#1f4fd8", "#2ec4d6", "#d62728"]
-names = ["NCR/NET (1)", "Edema (2)", "Enhancing tumor (4)"]
+names = ["NCR (1)", "Edema (2)", "Enhancing tumor (3)"]
 cmap = ListedColormap(colors)
-norm = BoundaryNorm([0.5, 1.5, 3, 4.5], cmap.N)
+norm = BoundaryNorm([0.5, 1.5, 2.5, 3.5], cmap.N)
 
 fig, axes = plt.subplots(2, 4, figsize=(16, 8.5))
 
