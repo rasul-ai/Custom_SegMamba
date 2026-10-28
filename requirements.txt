@@ -37,5 +37,5 @@ acvl-utils
 dynamic-network-architectures
 nnunetv2
 
-# Visualization (visualize_brats.py, comparison plots)
-matplotlib
+# Not pip packages: FSL (flirt, bet, convert_xfm, fslmaths) is needed only by segmamba_v2/svd_mni.py,
+# to bring SVD scans into the MSLesSeg space; install it from https://fsl.fmrib.ox.ac.uk
