@@ -3,10 +3,10 @@
 Small false-positive ET blobs are common in cases without enhancing tumor. Relabelling ET as necrosis
 removes it from the ET channel but keeps it in TC/WT, so only the ET region changes.
 
-1) tune on the validation split (writes logs/segmamba_v2/postprocessing.json):
+1) tune on the validation split (writes logs/brats2023/segmamba_v2/postprocessing.json):
        python segmamba_v2/predict.py --split val
        python segmamba_v2/postprocess.py tune
-2) apply to the test predictions (prediction_results/segmamba_v2 -> prediction_results/segmamba_v2_pp):
+2) apply to the test predictions (prediction_results/brats2023/segmamba_v2 -> .../segmamba_v2_pp):
        python segmamba_v2/postprocess.py apply
 """
 import config as cfg  # must be first
@@ -94,9 +94,9 @@ def apply(pred_name, out_name):
     with open(cfg.postprocess_file) as f:
         params = json.load(f)
     mc, mt = params["min_component"], params["min_total"]
-    out_dir = os.path.join("prediction_results", out_name)
+    out_dir = os.path.join(cfg.brats2023.results_root, out_name)
     os.makedirs(out_dir, exist_ok=True)
-    print(f"min_component={mc} min_total={mt}: prediction_results/{pred_name} -> {out_dir}")
+    print(f"min_component={mc} min_total={mt}: {cfg.brats2023.results_root}/{pred_name} -> {out_dir}")
 
     changed = 0
     for case_name in tqdm(case_names("test"), desc="test cases"):

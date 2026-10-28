@@ -1,14 +1,14 @@
 """Dice / HD95 for TC, WT, ET on the val or test split, under two conventions.
 
   legacy       : identical to 5_compute_metrics.py; if the prediction OR the ground truth is empty -> Dice 0, HD95 50.
-                 Used in the Sep 30 report, so use it for comparisons with those numbers.
+                 Use it to compare with 5_compute_metrics.py numbers (e.g. 3_train.py's SegMamba, Swin UNETR).
   empty_aware  : if BOTH are empty -> Dice 1, HD95 0 (the case was predicted correctly); one empty -> Dice 0, HD95 50.
                  Only this convention can reward ET post-processing on cases without enhancing tumor.
 
 Run:  python segmamba_v2/evaluate.py --pred_name segmamba_v2        --split test
       python segmamba_v2/evaluate.py --pred_name segmamba_v2_pp     --split test
       python segmamba_v2/evaluate.py --pred_name segmamba_v2_val    --split val
-Writes prediction_results/result_metrics/<pred_name>.npy (legacy, same format as 5_compute_metrics.py,
+Writes prediction_results/brats2023/result_metrics/<pred_name>.npy (legacy, same format as 5_compute_metrics.py,
 so swinunetr/compare_models.py can read it) and <pred_name>_empty_aware.npy.
 """
 import config as cfg  # must be first
@@ -21,14 +21,13 @@ import SimpleITK as sitk
 import torch
 from tqdm import tqdm
 
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
 
 REGIONS = ["TC", "WT", "ET"]
-METRICS_DIR = os.path.join("prediction_results", "result_metrics")
+METRICS_DIR = os.path.join(cfg.brats2023.results_root, "result_metrics")
 
 
 def case_names(split):
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(cfg.data_dir)
+    train_ds, val_ds, test_ds = cfg.get_datasets()
     ds = val_ds if split == "val" else test_ds
     # same order as 5_compute_metrics.py iterates the dataset
     return [os.path.basename(p)[:-4] for p in ds.datalist]
@@ -42,17 +41,13 @@ def resolve_existing_path(candidates):
 
 
 def load_gt(case_name):
-    """(3, D, H, W) TC/WT/ET masks from the raw BraTS segmentation, same as 5_compute_metrics.py."""
-    case_dir = os.path.join(cfg.raw_data_dir, case_name)
-    path = resolve_existing_path([os.path.join(case_dir, f) for f in
-                                  ("seg.nii.gz", "seg.nii", f"{case_name}_seg.nii.gz", f"{case_name}_seg.nii")])
-    gt = sitk.GetArrayFromImage(sitk.ReadImage(path)).astype(np.int32)
-    gt[gt == 4] = 3
+    """(3, D, H, W) TC/WT/ET masks from the raw BraTS2023 segmentation, same as 5_compute_metrics.py."""
+    gt = sitk.GetArrayFromImage(sitk.ReadImage(cfg.brats2023.case_file(case_name, "seg"))).astype(np.int32)
     return cfg.convert_labels(torch.from_numpy(gt)[None], dim=0).numpy().astype(bool)
 
 
 def pred_path(pred_name, case_name):
-    folder = os.path.join("prediction_results", pred_name)
+    folder = os.path.join(cfg.brats2023.results_root, pred_name)
     return resolve_existing_path([os.path.join(folder, f"{case_name}.nii.gz"), os.path.join(folder, f"{case_name}.nii")])
 
 
@@ -84,7 +79,7 @@ def summarize(name, results):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pred_name", required=True, help="folder name under prediction_results/")
+    parser.add_argument("--pred_name", required=True, help="folder name under prediction_results/brats2023/")
     parser.add_argument("--split", choices=["val", "test"], default="test")
     args, _ = parser.parse_known_args()
 

@@ -1,7 +1,7 @@
 """Predict a split with SegMamba v2 (sliding window + 8x mirror TTA, same as 4_predict.py).
 
-Run:  python segmamba_v2/predict.py --split val     -> prediction_results/segmamba_v2_val/  (for tuning post-processing)
-      python segmamba_v2/predict.py --split test    -> prediction_results/segmamba_v2/
+Run:  python segmamba_v2/predict.py --split val     -> prediction_results/brats2023/segmamba_v2_val/  (for tuning post-processing)
+      python segmamba_v2/predict.py --split test    -> prediction_results/brats2023/segmamba_v2/
       add --ckpt path/to/model.pt to choose a checkpoint (default: best_model_*.pt), --seed N for another run
 Output: <case>.nii.gz with TC/WT/ET channels, same format as 4_predict.py, no post-processing.
 """
@@ -16,7 +16,6 @@ import torch
 from monai.inferers import SlidingWindowInferer
 from monai.utils import set_determinism
 
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
 from light_training.evaluation.metric import dice
 from light_training.prediction import Predictor
 from light_training.trainer import Trainer
@@ -101,7 +100,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=123)  # parsed in config.py; selects the run folder
     args = parser.parse_args()
 
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(cfg.data_dir)
+    train_ds, val_ds, test_ds = cfg.get_datasets()
     ds = val_ds if args.split == "val" else test_ds
     check_split(ds, args.split)
 

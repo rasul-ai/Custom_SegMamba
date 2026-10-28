@@ -1,7 +1,7 @@
-"""Train SegMamba v2 (Phase A recipe) on BraTS2020 with the same data and split as 3_train.py.
+"""Train SegMamba v2 (Phase A recipe) on BraTS2023 with the same data and split as 3_train.py.
 
-Run from anywhere:  python segmamba_v2/train.py              (seed 123 -> logs/segmamba_v2/)
-                    python segmamba_v2/train.py --seed 7     (-> logs/segmamba_v2_seed7/)
+Run from anywhere:  python segmamba_v2/train.py              (seed 123 -> logs/brats2023/segmamba_v2/)
+                    python segmamba_v2/train.py --seed 7     (-> logs/brats2023/segmamba_v2_seed7/)
 """
 import config as cfg  # must be first: sets sys.path, cwd and CUDA allocator config
 
@@ -14,7 +14,6 @@ import torch
 from monai.utils import set_determinism
 
 import light_training.trainer as lt_trainer
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
 from light_training.evaluation.metric import dice
 from light_training.trainer import Trainer
 from light_training.utils.files_helper import save_new_model_and_delete_last
@@ -169,7 +168,7 @@ if __name__ == "__main__":
                                 master_port=17762,
                                 training_script=__file__)
 
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(cfg.data_dir)
+    train_ds, val_ds, test_ds = cfg.get_datasets()
     save_split(train_ds, val_ds, test_ds)
 
     trainer.train(train_dataset=train_ds, val_dataset=val_ds)
