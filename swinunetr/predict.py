@@ -1,8 +1,8 @@
 """Predict the test split with Swin UNETR, exactly like 4_predict.py does for SegMamba.
 
-Run:  python swinunetr/predict.py                      (uses logs/swinunetr/model/best_model_*.pt)
+Run:  python swinunetr/predict.py                      (uses logs/brats2023/swinunetr/model/best_model_*.pt)
       python swinunetr/predict.py --ckpt path/to/model.pt
-Output: prediction_results/swinunetr/<case>.nii.gz  (TC/WT/ET channels, same format as SegMamba)
+Output: prediction_results/brats2023/swinunetr/<case>.nii.gz  (TC/WT/ET channels, same format as SegMamba)
 """
 import config as cfg  # must be first
 
@@ -15,7 +15,6 @@ import torch
 from monai.inferers import SlidingWindowInferer
 from monai.utils import set_determinism
 
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
 from light_training.evaluation.metric import dice
 from light_training.prediction import Predictor
 from light_training.trainer import Trainer
@@ -103,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", type=str, default=None)
     args = parser.parse_args()
 
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(cfg.data_dir)
+    train_ds, val_ds, test_ds = cfg.get_datasets()
     check_split(test_ds)
 
     predictor = SwinUNETRPredictor(ckpt=find_checkpoint(args.ckpt),

@@ -1,4 +1,4 @@
-"""Shared settings for the Swin UNETR baseline.
+"""Shared settings for the Swin UNETR baseline on BraTS2023.
 
 Everything that affects the comparison with SegMamba (data, split, patch size,
 epochs, label mapping) is kept identical to 3_train.py / 4_predict.py.
@@ -20,14 +20,16 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 
+import brats2023
+
 # ---------------- data (same as SegMamba) ----------------
-# Anchor paths at the repository root so running from any CWD is safe.
-data_dir = os.path.join(ROOT, "data", "fullres", "train")
-raw_data_dir = os.path.join(ROOT, "data", "BraTS2020_TrainingData", "MICCAI_BraTS2020_TrainingData")
+# BraTS2023 paths and the patient-level split come from brats2023.py at the repo root.
+data_dir = brats2023.data_dir
+raw_data_dir = brats2023.raw_data_dir
 roi_size = [128, 128, 128]
 
 # ---------------- training (same budget as SegMamba) ----------------
-logdir = "logs/swinunetr"
+logdir = os.path.join(brats2023.logs_root, "swinunetr")
 model_save_path = os.path.join(logdir, "model")
 split_file = os.path.join(logdir, "data_split.json")
 env = "pytorch"
@@ -61,7 +63,7 @@ warmup_ratio = 0.03  # fraction of total steps
 loss_name = "ce"
 
 # ---------------- inference (same as SegMamba 4_predict.py) ----------------
-save_path = "prediction_results/swinunetr"
+save_path = os.path.join(brats2023.results_root, "swinunetr")
 sw_batch_size = 2
 sw_overlap = 0.5
 mirror_axes = [0, 1, 2]
@@ -72,7 +74,7 @@ def build_model():
 
     kwargs = dict(
         in_channels=4,
-        out_channels=4,  # background, NCR/NET (1), ED (2), ET (4 -> 3)
+        out_channels=4,  # background, NCR (1), ED (2), ET (3)
         feature_size=feature_size,
         drop_rate=drop_rate,
         attn_drop_rate=attn_drop_rate,
@@ -90,8 +92,7 @@ def build_model():
 
 
 def map_brats_labels(label):
-    """BraTS2020 labels {0,1,2,4} -> {0,1,2,3}; padding (-1) -> 0. Same as 3_train.py."""
-    label = torch.where(label == 4, torch.full_like(label, 3), label)
+    """BraTS2023 labels are already {0,1,2,3}; padding (-1) -> 0. Same as 3_train.py."""
     label = torch.where(label < 0, torch.zeros_like(label), label)
     return label
 
@@ -100,6 +101,11 @@ def convert_labels(labels, dim=1):
     """TC, WT, ET region masks, same order as SegMamba."""
     result = [(labels == 1) | (labels == 3), (labels == 1) | (labels == 3) | (labels == 2), labels == 3]
     return torch.cat(result, dim=dim).float()
+
+
+def get_datasets():
+    """(train, val, test) MedicalDatasets: the patient-level BraTS2023 split shared by all models."""
+    return brats2023.get_train_val_test_loader(data_dir)
 
 
 def split_names(ds):

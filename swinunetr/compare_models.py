@@ -1,4 +1,4 @@
-"""Compare SegMamba and Swin UNETR on the test split.
+"""Compare SegMamba and Swin UNETR on the BraTS2023 test split.
 
 Needs both metric files produced by the repo's 5_compute_metrics.py:
     python 5_compute_metrics.py --pred_name segmamba
@@ -32,7 +32,7 @@ def wilcoxon_p(a, b):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--models", nargs=2, default=["segmamba", "swinunetr"])
-    parser.add_argument("--metrics_dir", default=os.path.join(ROOT, "prediction_results", "result_metrics"))
+    parser.add_argument("--metrics_dir", default=os.path.join(ROOT, "prediction_results", "brats2023", "result_metrics"))
     args = parser.parse_args()
 
     a_name, b_name = args.models

@@ -1,4 +1,4 @@
-"""Train Swin UNETR on BraTS2020 with the same data, split and pipeline as 3_train.py.
+"""Train Swin UNETR on BraTS2023 with the same data, split and pipeline as 3_train.py.
 
 Run from anywhere:  python swinunetr/train.py
 """
@@ -13,7 +13,6 @@ import torch.nn as nn
 from monai.losses import DiceCELoss
 from monai.utils import set_determinism
 
-from light_training.dataloading.dataset import get_train_val_test_loader_from_train
 from light_training.evaluation.metric import dice
 from light_training.trainer import Trainer
 from light_training.utils.files_helper import save_new_model_and_delete_last
@@ -149,7 +148,7 @@ if __name__ == "__main__":
                                master_port=17760,
                                training_script=__file__)
 
-    train_ds, val_ds, test_ds = get_train_val_test_loader_from_train(cfg.data_dir)
+    train_ds, val_ds, test_ds = cfg.get_datasets()
     ensure_non_empty_split(train_ds, val_ds, test_ds)
     save_split(train_ds, val_ds, test_ds)
 
